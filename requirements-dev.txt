@@ -1,0 +1,5 @@
+# Everything needed to run the backend, the chat UI and the tests locally.
+-r backend/requirements.txt
+-r frontend/requirements.txt
+pytest>=8.0
+httpx>=0.27
