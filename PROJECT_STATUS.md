@@ -12,7 +12,8 @@ Deadline: Tuesday 10:00 AM IST.
 - [x] Deployed to the company account (18 resources), /health = 200
   - URL: http://cloudpilot-ai-alb-713274180.ap-southeast-2.elb.amazonaws.com
 - [x] Chat verified with OpenAI gpt-5-mini (scale 1->3, CPU/memory 256/512 -> 512/1024 -> 256/512, delete refused); 85 tests pass
-- [ ] Commit + push, submission email
+- [x] Commit + push (8d8a192), README: live URL, 'What changed on 10 Nov', requirement coverage
+- [ ] Submission email (before 10 PM)
 
 ## Key decisions
 - Region: **ap-southeast-2 (Sydney)**. The AWS account uses AWS's "projects" sign-up, whose
@@ -41,5 +42,5 @@ Deadline: Tuesday 10:00 AM IST.
 - [x] Chat changes verified against the live service (scale + CPU/memory)
 - [x] Rebuild/push image with final code, force new deployment (public `/` shows control_api: False)
 - [x] README.md
-- [ ] GitHub repository created and pushed (with approval)
+- [x] GitHub repository created and pushed
 - [ ] After review: `terraform destroy` (with approval)

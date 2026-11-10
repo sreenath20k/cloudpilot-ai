@@ -8,11 +8,44 @@ Built for the ReGoBs Technologies machine task *"System Test: Deploy a Service o
 
 ## Demo
 
-Live in AWS (ECS Fargate, ap-southeast-2), requests interpreted by **OpenAI gpt-5-mini**; every reply shows which interpreter understood it.
+**Live service:** http://cloudpilot-ai-alb-713274180.ap-southeast-2.elb.amazonaws.com · health check: http://cloudpilot-ai-alb-713274180.ap-southeast-2.elb.amazonaws.com/health (HTTP 200)
+
+Deployed with this Terraform in the AWS account provided for the task (ECS Fargate, ap-southeast-2). Chat requests are interpreted by **OpenAI gpt-5-mini**, and every reply shows which interpreter understood it.
 
 | "we're expecting a traffic spike, give me three copies" → confirmed → 3 tasks running | "bump each container to half a vCPU and a gig of RAM" → new task definition revision, rolling deployment | "delete everything" → refused, with what is supported |
 | --- | --- | --- |
 | ![Scale to 3 tasks](docs/screenshots/chat-openai-scale-to-3.png) | ![CPU and memory change](docs/screenshots/chat-openai-cpu-memory.png) | ![Unsupported request](docs/screenshots/chat-openai-unsupported.png) |
+
+## What changed on 10 Nov 2026
+
+The first version (9 Nov) was built and tested in a personal AWS account with the rule-based parser only. On 10 Nov, as requested by ReGoBs:
+
+| Change | Details | Files |
+| --- | --- | --- |
+| Deployed to the provided AWS account | Same Terraform and image, applied in the company account (CLI profile `regobs`): 18 resources, new ECR repository and ALB URL. The personal deployment was destroyed. | `terraform/` (unchanged) |
+| OpenAI (ChatGPT) interprets chat requests | New `LLMParser` sends each request to OpenAI with a strict JSON schema (Structured Outputs). The model can only return one of seven intents; it never calls AWS. | `backend/llm_parser.py` (new), `backend/main.py`, `backend/config.py` |
+| Rule-based parser kept as an extra | Used when no key is set, with `PARSER_MODE=rules`, or automatically if the OpenAI call fails. Responses report which interpreter was used (`parser` field, `GET /chat/info`). | `backend/chat_engine.py`, `backend/main.py` |
+| Local settings file | `backend/.env` (git-ignored and docker-ignored) holds `OPENAI_API_KEY`, `AWS_PROFILE` and the chat settings; `backend/.env.example` is the template. `*.csv` is git-ignored so downloaded access-key files can't be committed. | `backend/.env.example` (new), `backend/config.py`, `.gitignore` |
+| UI shows the interpreter | "Interpreted by: …" under each reply and the active interpreter in the sidebar. | `frontend/app.py` |
+| Tests | 17 new tests: fake OpenAI client, strict schema, malformed model output, API failure → rules fallback, out-of-limit value from the model still rejected. 85 tests in total. | `tests/test_llm_parser.py` (new), `tests/test_api.py` |
+| README | Live URL, this section, requirement coverage, OpenAI setup, macOS/Linux commands, new screenshots. | `README.md`, `docs/screenshots/` |
+
+## Requirement coverage
+
+| Requirement (task PDF) | How it is met | Where |
+| --- | --- | --- |
+| Web service with `GET /health` returning HTTP 200 | FastAPI app; verified 200 on the live URL | `backend/main.py` |
+| Packaged with Docker | Slim Python image, non-root user, health check | `backend/Dockerfile` |
+| Image pushed to Amazon ECR | Pushed from the developer machine to the Terraform-created repository | §11 |
+| Terraform: VPC and subnets | VPC + 2 public subnets in 2 AZs, IGW, route table, security groups | `terraform/networking.tf` |
+| Terraform: ECS cluster and the ECS service running the image | Cluster, task definition, Fargate service behind an ALB | `terraform/ecs.tf`, `terraform/alb.tf` |
+| Service reachable through a URL | ALB DNS name (above) | `terraform output app_url` |
+| Web page for plain-text requests that change the service spec | Streamlit chat + FastAPI `/chat` | `frontend/app.py`, `backend/main.py` |
+| Change applied to the running ECS service | `UpdateService` (task count) and new task definition revision + rolling deployment (CPU/memory), shown above on the live service | `backend/ecs_manager.py` |
+| User sees whether it succeeded | Deployment tracked until stable (✅) or failed (❌, auto-rollback) | `frontend/app.py` |
+| Clear message if unclear or can't be applied | Clarifying questions, validation errors with valid options, refusals for unsupported requests | `backend/llm_parser.py`, `chat_engine.py`, `validation.py` |
+| README: setup, deployment, example chat requests | §6–§15 | this file |
+| Use the provided AWS account and OpenAI key (ReGoBs, 10 Nov) | Deployed in the provided account; OpenAI interprets requests | see "What changed" |
 
 ---
 
@@ -180,6 +213,8 @@ aws sts get-caller-identity     # verify
 
 Recommended account hygiene: MFA on the root user, a monthly budget alert, and day-to-day work through an IAM identity.
 
+To use a named profile (for example a second account), run `aws configure --profile <name>`, then set it for the terminal session before running Terraform or the chat backend: `$env:AWS_PROFILE = "<name>"` (PowerShell) or `export AWS_PROFILE=<name>` (bash). The chat backend can also read `AWS_PROFILE` from `backend/.env`.
+
 ## 11. ECR setup and image push
 
 The ECR repository is created by Terraform first, because the ECS service needs the image to exist:
@@ -346,6 +381,7 @@ Approximate on-demand cost while running in ap-southeast-2: ALB ~$0.03/h, one 0.
 # 1. Stop the local processes (Ctrl+C in both terminals)
 # 2. Destroy all AWS resources created by Terraform (ECR images are removed too: force_delete = true)
 cd terraform
+# use the same AWS account/profile you deployed with, e.g. $env:AWS_PROFILE = "regobs"
 terraform destroy
 # 3. Optional: deregister the extra task definition revisions created by the chat (they cost nothing)
 aws ecs list-task-definitions --family-prefix cloudpilot-ai
