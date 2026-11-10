@@ -52,8 +52,8 @@ def api(method: str, path: str, payload: dict | None = None, timeout: int = 30) 
     return False, {"message": f"Error {response.status_code}: {message}"}
 
 
-def add_message(role: str, content: str, kind: str = "info", data: dict | None = None) -> None:
-    st.session_state.messages.append({"role": role, "content": content, "kind": kind, "data": data})
+def add_message(role: str, content: str, kind: str = "info", data: dict | None = None, parser: str | None = None) -> None:
+    st.session_state.messages.append({"role": role, "content": content, "kind": kind, "data": data, "parser": parser})
 
 
 def render_message(msg: dict) -> None:
@@ -69,6 +69,8 @@ def render_message(msg: dict) -> None:
             st.warning(msg["content"], icon="⚠️")
         elif kind == "confirm":
             st.info(msg["content"], icon="❓")
+        if msg.get("parser"):
+            st.caption(f"Interpreted by: {msg['parser']}")
         if msg.get("data"):
             with st.expander("Details"):
                 st.json(msg["data"])
@@ -107,7 +109,13 @@ def handle_user_text(text: str) -> None:
         return
     status = body.get("status")
     data = body.get("data")
-    add_message("assistant", body.get("message", ""), KIND_FOR_STATUS.get(status, "info"), data if status == "ok" else None)
+    add_message(
+        "assistant",
+        body.get("message", ""),
+        KIND_FOR_STATUS.get(status, "info"),
+        data if status == "ok" else None,
+        body.get("parser"),
+    )
     if status == "needs_confirmation":
         st.session_state.pending = body["action"]
 
@@ -206,6 +214,9 @@ with st.sidebar:
         st.caption(f"Region: `{spec['region']}`")
     else:
         st.error(spec["message"])
+    ok_info, info = api("GET", "/chat/info", timeout=10)
+    if ok_info:
+        st.caption(f"Interpreter: `{info['parser']}` (rules as fallback)")
     if APP_URL:
         st.markdown(f"[Open the running service ↗]({APP_URL})")
     st.button("Refresh", use_container_width=True)

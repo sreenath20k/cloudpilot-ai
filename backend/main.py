@@ -10,6 +10,10 @@ Control endpoints (only when CONTROL_API_ENABLED=true - used by the local chat i
   GET  /service/spec     current ECS service specification
   POST /chat             interpret a plain-English request
   POST /chat/confirm     apply a change the user has confirmed
+
+Requests are interpreted by an OpenAI model (when OPENAI_API_KEY is set) or by the
+deterministic rule-based parser. Either way the result is the same structured Intent,
+which is validated and confirmed before anything changes in AWS.
 """
 
 import os
@@ -21,7 +25,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
-from chat_engine import parse_request
+from chat_engine import Intent, parse_request
 from config import Settings, load_settings
 from validation import plan_desired_count, plan_task_size
 
@@ -62,6 +66,7 @@ class ChatResponse(BaseModel):
     message: str
     action: ChangeAction | None = None
     data: dict | None = None
+    parser: str | None = None  # which interpreter understood the request
 
 
 # ---------- dependencies ----------
@@ -78,6 +83,29 @@ def get_manager():
 
     settings = get_settings()
     return ECSManager(settings.ecs_cluster, settings.ecs_service, settings.aws_region)
+
+
+@lru_cache
+def get_parser():
+    """The OpenAI interpreter when configured, otherwise None (rule-based parser)."""
+    settings = get_settings()
+    if settings.parser_mode == "rules" or not settings.openai_api_key:
+        return None
+    from llm_parser import LLMParser
+
+    return LLMParser(settings.openai_api_key, settings.openai_model)
+
+
+def interpret(message: str, parser) -> tuple[Intent, str]:
+    """Interpret with the LLM when available; fall back to the rule-based parser on any failure."""
+    if parser is None:
+        return parse_request(message), "rules"
+    from llm_parser import LLMParserError
+
+    try:
+        return parser.parse(message), parser.name
+    except LLMParserError as exc:
+        return parse_request(message), f"rules (fallback: {parser.name} unavailable - {str(exc)[:120]})"
 
 
 def _run(fn, *args):
@@ -115,10 +143,25 @@ def service_status(manager=Depends(get_manager)) -> dict:
     return _run(manager.get_status)
 
 
-@control.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest, manager=Depends(get_manager), settings: Settings = Depends(get_settings)) -> ChatResponse:
-    intent = parse_request(request.message)
+@control.get("/chat/info")
+def chat_info(parser=Depends(get_parser)) -> dict:
+    return {"parser": parser.name if parser else "rules"}
 
+
+@control.post("/chat", response_model=ChatResponse, response_model_exclude_none=False)
+def chat(
+    request: ChatRequest,
+    manager=Depends(get_manager),
+    settings: Settings = Depends(get_settings),
+    parser=Depends(get_parser),
+) -> ChatResponse:
+    intent, parser_used = interpret(request.message, parser)
+    response = _chat_response(intent, manager, settings)
+    response.parser = parser_used
+    return response
+
+
+def _chat_response(intent: Intent, manager, settings: Settings) -> ChatResponse:
     if intent.kind == "help":
         return ChatResponse(status="ok", message=intent.message)
     if intent.kind == "clarify":
@@ -204,7 +247,7 @@ def create_app(control_api_enabled: bool | None = None) -> FastAPI:
             # load balancer shows which task answered (useful when demoing scaling).
             "host": socket.gethostname(),
             "control_api": enabled,
-            "endpoints": ["/", "/health", "/docs"] + (["/service/spec", "/service/status", "/chat", "/chat/confirm"] if enabled else []),
+            "endpoints": ["/", "/health", "/docs"] + (["/service/spec", "/service/status", "/chat", "/chat/info", "/chat/confirm"] if enabled else []),
         }
 
     @app.get("/health")

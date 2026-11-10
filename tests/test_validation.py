@@ -12,6 +12,9 @@ SETTINGS = Settings(
     max_desired_count=5,
     max_cpu=1024,
     max_memory=4096,
+    parser_mode="rules",
+    openai_api_key=None,
+    openai_model="test-model",
 )
 
 

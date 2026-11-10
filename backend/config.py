@@ -7,6 +7,16 @@ AWS credentials are NOT configured here: boto3 finds them automatically
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+# Optional: read settings (including OPENAI_API_KEY) from backend/.env for local runs.
+# .env is git-ignored and docker-ignored, so the key never reaches GitHub or the image.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except ImportError:  # python-dotenv is optional
+    pass
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -27,6 +37,10 @@ class Settings:
     max_desired_count: int
     max_cpu: int
     max_memory: int
+    # Natural-language interpreter: "auto" = OpenAI when a key is set, otherwise rules.
+    parser_mode: str
+    openai_api_key: str | None
+    openai_model: str
 
 
 def load_settings() -> Settings:
@@ -39,4 +53,7 @@ def load_settings() -> Settings:
         max_desired_count=int(os.getenv("MAX_DESIRED_COUNT", "5")),
         max_cpu=int(os.getenv("MAX_CPU", "1024")),
         max_memory=int(os.getenv("MAX_MEMORY", "4096")),
+        parser_mode=os.getenv("PARSER_MODE", "auto").strip().lower(),
+        openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+        openai_model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
     )
